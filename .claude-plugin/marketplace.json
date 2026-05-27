@@ -1,0 +1,13 @@
+{
+  "name": "game-builder",
+  "owner": {
+    "name": "Jinn"
+  },
+  "plugins": [
+    {
+      "name": "char-design",
+      "source": "./plugins/char-design",
+      "description": "游戏角色从设计图到立绘的完整实现流程"
+    }
+  ]
+}
