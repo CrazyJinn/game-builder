@@ -25,6 +25,7 @@ OfoxAI Images API - 图片生成脚本
 
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -32,19 +33,40 @@ from typing import Optional, List, Dict, Any
 import requests
 
 
-def load_settings() -> dict:
-    script_dir = Path(__file__).parent
-    settings_path = script_dir.parent.parent.parent.parent / "settings.json"
-    if not settings_path.exists():
-        raise FileNotFoundError(f"配置文件不存在: {settings_path}")
-    with open(settings_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def find_settings() -> dict:
+    """向上搜索 settings.json"""
+    dir_path = Path(__file__).resolve().parent
+    for _ in range(8):
+        dir_path = dir_path.parent
+        candidate = dir_path / "settings.json"
+        if candidate.exists():
+            with open(candidate, "r", encoding="utf-8") as f:
+                return json.load(f)
+    return {}
 
 
-_settings = load_settings()
+def load_api_key() -> str:
+    # 1. 命令行 --api-key（由 SKILL.md 注入）
+    for i, arg in enumerate(sys.argv):
+        if arg == "--api-key" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    # 2. 环境变量
+    key = os.environ.get("CLAUDE_PLUGIN_OPTION_ofox_api_key")
+    if key:
+        return key
+    key = os.environ.get("OFOX_API_KEY")
+    if key:
+        return key
+    # 3. 向上搜索 settings.json → ofox 字段
+    settings = find_settings()
+    key = settings.get("ofox", "")
+    if key:
+        return key
+    raise SystemExit("错误：未设置 API Key。\n请通过以下任一方式提供：\n  1. 命令行 --api-key <key>\n  2. 环境变量 OFOX_API_KEY\n  3. settings.json 中的 ofox 字段")
+
 
 API_BASE = "https://api.ofox.io/v1"
-API_KEY = _settings.get("ofox", "")
+API_KEY = load_api_key()
 DEFAULT_MODEL = "openai/gpt-image-2"
 
 
@@ -202,6 +224,9 @@ def main():
                 output = sys.argv[i + 1]; i += 2
             else:
                 i += 1
+
+        # 强制质量为 low
+        quality = "low"
 
         # 校验图片文件
         for img in image:

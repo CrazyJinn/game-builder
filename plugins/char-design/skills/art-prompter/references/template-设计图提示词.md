@@ -4,20 +4,25 @@
 
 ## 提取映射
 
-从 `美术设定.md` 提取细节，按以下维度组织，确保每个维度的细节完整无遗漏：
+从图节点和文件中提取细节，按以下维度组织，确保每个维度的细节完整无遗漏：
 
-| 美术设定字段 | 提取维度 | 细节粒度示例 |
-|------------|---------|------------|
-| 外貌特征 → 体型 | body | 身高、体型曲线、肩线、站姿 |
-| 外貌特征 → 面部 | face | 脸型、眼型/眼色、眉型、鼻、唇色/唇形、默认表情 |
-| 外貌特征 → 发型 | hair | 发色、长度、发型、质感、配件 |
-| 外貌特征 → 特殊标记 | accessories | 饰品、手持物、疤痕、纹身 |
-| 材质方向 | clothing 材质 | 面料质感（丝绸/皮革/金属等）、缝线/刺绣细节 |
-| 色彩方向 | clothing 配色 | 主色→用途、辅色→用途、点缀色→用途 |
-| — | clothing 款式 | 层次（内搭/外层）、剪裁（收腰/宽松）、开衩/下摆 |
-| — | footwear | 鞋袜款式、颜色 |
-| 体态气质 | posture | 默认站姿（仅静态，双手自然垂于身侧） |
-| — | dynamics | 飘动物品、风的效果 |
+**数据来源**：
+- **AppearanceStyle 节点**：appearance（外貌描述）、color_direction（色彩方向）、shape_language（形状语言）、visual_tone（视觉气质）、first_impression（第一印象）、memory_points（记忆点）
+- **CostumeStyle 节点**：default_outfit（默认着装）、material_direction（材质方向）、posture（体态气质）、accessories（配饰）
+- **`00_init/美术风格.md`**：全局美术风格（画风、头身比、渲染风格、设计图/立绘规格等）
+
+| 数据来源 | 图节点字段 | 提取维度 | 细节粒度示例 |
+|---------|----------|---------|------------|
+| AppearanceStyle.appearance | 体型 | body | 身高、体型曲线、肩线、站姿 |
+| AppearanceStyle.appearance | 面部 | face | 脸型、眼型/眼色、眉型、鼻、唇色/唇形、默认表情 |
+| AppearanceStyle.appearance | 发型 | hair | 发色、长度、发型、质感、配件 |
+| AppearanceStyle.appearance | 特殊标记 | accessories | 饰品、手持物、疤痕、纹身 |
+| CostumeStyle.material_direction | 材质方向 | clothing 材质 | 面料质感（丝绸/皮革/金属等）、缝线/刺绣细节 |
+| AppearanceStyle.color_direction | 色彩方向 | clothing 配色 | 主色→用途、辅色→用途、点缀色→用途 |
+| CostumeStyle.default_outfit | 着装 | clothing 款式 | 层次（内搭/外层）、剪裁（收腰/宽松）、开衩/下摆 |
+| CostumeStyle.default_outfit | 着装 | footwear | 鞋袜款式、颜色 |
+| CostumeStyle.posture | 体态气质 | posture | 默认站姿（仅静态，双手自然垂于身侧） |
+| 00_init/美术风格.md | 风格 | dynamics | 飘动物品、风的效果 |
 
 ---
 
@@ -46,7 +51,7 @@
 9. **风格标签**（放末尾）
 
 ## 玩家记忆点（设计重点）
-- [从美术设定"玩家记忆点"提取，确保这些元素在提示词中被强调]
+- [从 AppearanceStyle.memory_points 提取，确保这些元素在提示词中被强调]
 ```
 
 ---
@@ -75,6 +80,6 @@
 
 ### 提取原则
 
-1. **只提取不创作**：所有视觉细节从 `美术设定.md` 提取，不添加设定中未提及的元素
+1. **只提取不创作**：所有视觉细节从图节点字段（AppearanceStyle、CostumeStyle）和 `00_init/美术风格.md` 提取，不添加数据中未提及的元素
 2. **不遗漏**：对照提取映射表逐项检查，确保每个维度都有覆盖
 3. **细节转自然语言**：美术设定中的列举式描述转为连贯的自然语言句子

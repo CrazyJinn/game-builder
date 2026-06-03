@@ -84,17 +84,7 @@ allowed-tools: Read, Bash, Write, Edit
 
 ### 第四步：执行查询
 
-使用 `execute_cypher.py` 执行生成的 Cypher：
-
-```bash
-python scripts/execute_cypher.py -c "<cypher>" --password <password> --json
-```
-
-或从文件执行复杂查询：
-
-```bash
-python scripts/query_graph.py <command> --password <password>
-```
+使用 `scripts/execute_cypher.py` 执行生成的 Cypher，或从文件执行复杂查询`scripts/query_graph.py`
 
 **执行原则：**
 - 优先使用 `--json` 输出以便结构化解析
@@ -153,21 +143,11 @@ python scripts/query_graph.py <command> --password <password>
 
 如果不确定图中实际有哪些数据，先执行探查：
 
-```bash
-# 查看统计
-python scripts/query_graph.py stats --password <password>
+- 查看统计`scripts/query_graph.py`
+- 查看所有节点标签`scripts/execute_cypher.py`
+- 查看所有边类型`scripts/execute_cypher.py`
+- 查看某标签的属性键`scripts/execute_cypher.py`
 
-# 查看所有节点标签
-python scripts/execute_cypher.py -c "CALL db.labels()" --password <password> --json
-
-# 查看所有边类型
-python scripts/execute_cypher.py -c "CALL db.relationshipTypes()" --password <password> --json
-
-# 查看某标签的属性键
-python scripts/execute_cypher.py -c "MATCH (n:char) WITH n LIMIT 1 RETURN keys(n) AS props" --password <password> --json
-```
-
----
 
 ## 脚本清单
 
@@ -189,28 +169,6 @@ python scripts/execute_cypher.py -c "MATCH (n:char) WITH n LIMIT 1 RETURN keys(n
 | `import_csv.py` | 导入 CSV 到 Neo4j |
 | `check_dedup.py` | 去重检查与合并 |
 | `verify_graph.py` | 图完整性验证 |
-
-### 管理操作详细用法
-
-**数据导入：**
-```bash
-# CSV 导入
-python scripts/import_csv.py <csv_dir> --password <password>
-
-# LOAD CSV 服务端导入
-python scripts/import_csv.py <csv_dir> --password <password> --cypher <csv_dir>/import.cypher
-```
-
-**去重：**
-```bash
-python scripts/check_dedup.py check --password <password>
-python scripts/check_dedup.py merge --label char --field 姓名 --keep char_001 --password <password>
-```
-
-**验证：**
-```bash
-python scripts/verify_graph.py --password <password>
-```
 
 ---
 

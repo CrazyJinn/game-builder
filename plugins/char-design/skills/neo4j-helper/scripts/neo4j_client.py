@@ -14,7 +14,12 @@ class Neo4jClient:
     def __init__(self, uri=None, user=None, password=None):
         self.uri = uri or os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         self.user = user or os.environ.get("NEO4J_USER", "neo4j")
-        self.password = password or os.environ.get("NEO4J_PASSWORD", "")
+        self.password = (
+            password
+            or os.environ.get("NEO4J_PASSWORD")
+            or os.environ.get("CLAUDE_PLUGIN_OPTION_neo4j_password")
+            or "12345678"
+        )
         self.driver = None
 
     def connect(self):
@@ -41,6 +46,10 @@ class Neo4jClient:
 
     def __exit__(self, *args):
         self.close()
+
+    def run_query(self, cypher, parameters=None):
+        """run() 的别名"""
+        return self.run(cypher, parameters)
 
     def run(self, cypher, parameters=None):
         """执行单条 Cypher，返回结果列表"""

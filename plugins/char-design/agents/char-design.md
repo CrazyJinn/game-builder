@@ -1,80 +1,188 @@
-
 ---
 name: char-design
-description: 游戏角色从设计图到立绘的完整实现流程
-tools: Read, Grep, Glob
+description: 按图数据库Schema构建角色美术图节点/边，支持 sync=true 自动级联推进
+allowed-tools: Read, Bash, Write, Edit
 ---
 
-## Workflow
+## 图模型概览
+
+读取叙事基础文档（默认 `00_init/Schema/角色美术.md`）和叙事内容。如无法解析，要求用户提供正确路径。
+
+---
+
+## 命令
 
 ### 阶段1：解析用户输入
 
-从用户的自然语言输入中提取以下信息：
+从用户自然语言中提取命令类型和参数：
 
-1. **目标角色**：识别角色名称或编号（如"陆择"、"char_001"）。
-   - 若输入的是角色**编号**（如 `char_001`），直接使用
-   - 若输入的是角色**名称**（如"陆择"），读取 `01_叙事数据/角色实体.md` 查表获取对应编号
-   - 若用户未指定具体角色（如"为所有角色生成图片"），读取 `01_叙事数据/角色实体.md` 获取全部角色列表
-   - 若用户指定"所有角色"之外的范围（如"女主们"、"星耀电竞的角色"），根据角色实体的 description 和上下文筛选匹配角色
-2. **产出类型**：识别用户要求生成的内容类型：
-   - `设计图` — 角色三视图设计图
-   - `立绘` — 角色立绘变体
-   - 未指定时默认两者都生成
-3. **额外约束**：用户可能提出的特定要求（如"只生成P0角色"、"先生成设计图"等），作为生成约束。
+**命令识别**：
+- 含"构建/创建/build/新建"→ **build** 命令
+- 含"处理/process/推进/生成"→ **process** 命令
+- 含"同步/sync/级联/cascade"→ **sync** 命令
+- 含"状态/status/查看"→ **status** 命令
 
-**角色编号查表**：`01_叙事数据/角色实体.md` 格式为：
+**角色识别**（保留原逻辑）：
+- 编号（如 `char_001`）→ 直接使用
+- 名称（如"陆择"）→ 读取 `01_叙事数据/角色实体.md` 查表
+- "所有角色"→ 读取全部列表
+- 范围筛选（如"女主们"）→ 按 description 和上下文匹配
 
-```
-| 编号 | 姓名 | 性别 | description | 上下文 |
-```
+**节点识别**：
+- 含节点 ID（如 `design_001`）→ 直接定位
+- 含节点类型（如"设计图"）→ 映射到 DesignSheet
 
-按姓名匹配编号，同时获取 description 和上下文作为补充信息。
+**场景识别**（仅 process 创建 IllusDesign 时需要）：
+- 含场景 ID（如 `scene_003`）→ 直接使用
+- 含场景名 → 通过 neo4j-helper 查询 Scene 节点
 
 **示例输入**：
-- "为 char_001 生成设计图" → 角色: char_001, 产出: 设计图
-- "给陆择生成全部图片" → 查表→ char_001, 产出: 设计图+立绘
-- "为所有角色生成图片" → 全部角色, 产出: 设计图+立绘
-- "生成女主们的立绘" → 查表筛选, 产出: 立绘
+- "为 char_001 构建美术图" → build(char_001)
+- "处理 design_001" → process(design_001)
+- "sync cascade from appearance_001" → sync(appearance_001)
+- "查看 char_001 美术状态" → status(char_001)
+- "为 char_001 在 scene_003 中创建立绘设计图" → process，创建 IllusDesign
 
-### 阶段2：查询 Neo4j
+---
 
-**通过 neo4j-helper skill 以自然语言查询**每个角色的信息：
+### build 命令：构建角色美术图
 
-> "查询编号为 <角色编号> 的角色节点，返回节点所有信息"
+为指定角色创建完整的美术子图（到 DesignSheet 层级），然后按依赖顺序处理所有节点。
 
-节点有如下信息需要关注：
-- `status`：前置检查
-- `design_prompt_path`：设计图提示词文件路径
-- `stand_painting_prompt_path`：立绘提示词文件路径
+**执行步骤**：
 
-最小粒度：每个有名字的真实人物。
+1. **验证 Character 存在**：通过 neo4j-helper 查询角色节点确认存在。
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| 编号 | string | 是 | `char_001` ~ `char_NNN` |
-| 姓名 | string | 是 | 真实姓名或昵称 |
-| 性别 | enum | 否 | `男` / `女` |
-| description |  | 否 | 人物简单介绍 |
-| 出生年份 | int | 否 | 如 2003 |
-| status | int | 否 | 流程推进状态，见下方枚举 |
-| art_design_path | string | 否 | 美术设定文档相对路径，如 `05_角色设计/char/char_001/美术设定.md` |
-| voice_style_path | string | 否 | 语言风格文档相对路径，如 `05_角色设计/char/char_001/语言风格.md` |
-| design_prompt_path | string | 否 | 设计图提示词文档相对路径，如 `06_角色美术/char_001/设计图提示词.md` |
-| stand_painting_prompt_path | string | 否 | 立绘提示词文档相对路径，如 `06_角色美术/char_001/立绘/提示词.md` |
-| design_image_path | string | 否 | 设计图图片相对路径，如 `06_角色美术/char_001/设计图.png` |
+2. **读取美术风格**：从 `00_init/美术风格.md` 读取全局美术风格参数（画风、头身比、渲染风格等）。
 
-**人物 status**：
-- `0`: 初始状态
-- `1`: 角色设计完成（美术设定 + 语言风格已生成）
-- `2`: 美术提示词完成（设计图 + 立绘提示词已生成）
-- `3`: 设计图生成完成（设计图 图片已生成）
+3. **分配 ID**：查询每种前缀的最大编号，递增分配新 ID：
+   ```
+   appearance_{N+1}  — AppearanceStyle
+   costume_{N+1}  — CostumeStyle
+   voice_{N+1}  — LanguageStyle
+   design_{N+1}  — DesignSheet
+   ```
 
-### 阶段3：推进角色设计进度
+4. **创建图结构**：通过 neo4j-helper（schema_path=`schema/02_角色美术.md`）执行批量 MERGE：
+   - AppearanceStyle / CostumeStyle / LanguageStyle（status=0）
+   - has_appearance / has_costume / has_voice_style 边（sync=true）
+   - DesignSheet（status=0）+ produces 边
 
-人物 status=0 -> 调用角色设计skill
-人物 status=1 -> 调用美术提示词skill，传递art_design_path与voice_style_path
-人物 status=2 -> 调用美术提示词skill，传递design_prompt_path
+5. **处理数据节点**（status 0→1）：调用 **concept-designer** skill，传入角色编号和各节点 ID。
 
-## 本 agent 使用的 Skills
+6. **处理 DesignSheet 提示词**（status 0→1）：调用 **art-prompter**（模式A），传入 DesignSheet ID。美术风格从 `00_init/美术风格.md` 读取。
 
-`角色概念设计` · `美术提示词` · `图片生成` · `neo4j-helper`
+7. **处理 DesignSheet 图片**（status 1→2）：调用 **image-generator**，传入 DesignSheet ID。
+
+8. **IllusDesign/StandingIllustration 不自动创建**——告知用户可通过 process 命令指定场景来创建。
+
+---
+
+### process 命令：处理指定节点
+
+根据目标节点类型和当前 status，调用对应 skill 推进一步。
+
+**识别目标**：
+- 若传入角色 ID（如 `char_001`）：查询该角色所有美术节点，找到 status 最低的未完成节点，按依赖顺序处理。
+- 若传入节点 ID（如 `design_001`）：直接处理该节点的下一步。
+- 若传入"在 scene_003 中创建立绘设计图"：为角色在该场景创建 IllusDesign + StandingIllustration 节点和边，然后处理。
+
+**创建 IllusDesign 流程**（用户手动指定场景）：
+1. 查询角色的 DesignSheet（需 status=2）和 CostumeStyle 节点
+2. 创建 IllusDesign 节点（status=0）
+3. 创建三条入边：produces(DesignSheet→IllusDesign, sync=false)、outfit_for(CostumeStyle→IllusDesign, sync=false)、context_for(Scene→IllusDesign, sync=false)
+4. 根据角色优先级（P0/P1/P2）和 LanguageStyle 创建 StandingIllustration 变体节点 + expands_to 边（sync=true）+ ref_style 边（sync=true）
+5. 处理 IllusDesign（status 0→1→2）
+6. 处理各 StandingIllustration（status 0→1→2）
+
+**节点处理依赖顺序**：
+```
+① LanguageStyle / AppearanceStyle / CostumeStyle  (status 0→1, concept-designer)
+② DesignSheet  (status 0→1 art-prompter, 1→2 image-generator)
+③ IllusDesign  (status 0→1 art-prompter, 1→2 image-generator)
+④ StandingIllustration  (status 0→1 art-prompter, 1→2 image-generator)
+```
+
+---
+
+### sync 命令：Sync 级联
+
+从指定节点出发，沿 sync=true 边 BFS 级联，将下游节点 status 重置为 0，然后按依赖顺序重新处理。
+
+**级联算法**：
+
+```
+1. 初始化: 队列 = [source_id], 已访问 = {}, 受影响 = []
+2. 循环直到队列为空:
+   a. 取出队首 current_id
+   b. 若 current_id ∈ 已访问, 跳过
+   c. 将 current_id 加入已访问
+   d. 通过 neo4j-helper 查询:
+      MATCH (src {id: $current_id})-[r]->(dst)
+      WHERE r.sync = true
+      RETURN dst.id AS id, labels(dst)[0] AS type
+   e. 对每个下游节点: 执行 SET status = 0, 加入队列, 加入受影响
+3. 报告受影响列表给用户
+4. 按依赖顺序重新处理受影响节点（调用对应 skill）
+```
+
+**级联路径示例**：
+
+```
+外貌变更 appearance_001:
+  appearance_001 →[produces✅]→ design_001 →[produces❌]→ (停止)
+  受影响: design_001
+
+语言风格变更 voice_001:
+  voice_001 →[ref_style✅]→ stand_001, stand_002, ...
+  受影响: 所有关联 StandingIllustration
+```
+
+**级联中断点**（sync=false，不自动级联）：
+- `DesignSheet → IllusDesign`（produces）
+- `CostumeStyle → IllusDesign`（outfit_for）
+- `Scene → IllusDesign`（context_for）
+
+---
+
+### status 命令：查看美术状态
+
+通过 neo4j-helper 查询角色的完整美术子图，返回各节点状态：
+
+```cypher
+MATCH (ch:Character {id: $char_id})
+OPTIONAL MATCH (ch)-[:has_appearance]->(app:AppearanceStyle)
+OPTIONAL MATCH (ch)-[:has_costume]->(cos:CostumeStyle)
+OPTIONAL MATCH (ch)-[:has_voice_style]->(voice:LanguageStyle)
+OPTIONAL MATCH (app)-[:produces]->(ds:DesignSheet)
+OPTIONAL MATCH (ds)-[:produces]->(illus:IllusDesign)
+OPTIONAL MATCH (illus)-[:expands_to]->(stand:StandingIllustration)
+RETURN ch.id, app, cos, voice, ds,
+       collect(DISTINCT illus) AS illus_nodes,
+       collect(DISTINCT stand) AS stand_nodes
+```
+
+格式化为表格展示，标注每步状态和下一步操作。
+
+---
+
+## ID 分配
+
+Neo4j 无自增 ID。通过查询现有最大编号来分配：
+
+```cypher
+MATCH (n) WHERE n.id STARTS WITH $prefix
+RETURN n.id ORDER BY n.id DESC LIMIT 1
+```
+
+递增数字后缀。无结果时从 `_001` 开始。
+
+---
+
+## Schema 参考
+
+图结构定义见 `schema/02_角色美术.md`。Cypher 模板见 neo4j-helper skill 的 `references/cypher-templates.md`。
+
+## 使用的 Skills
+
+`concept-designer` · `art-prompter` · `image-generator` · `neo4j-helper`
