@@ -36,7 +36,7 @@ allowed-tools: Read, Bash
 
 **规则：**
 
-1. 使用参数化查询（`$param`）防止注入
+1. **直接内联值，不使用 `$param` 参数化查询**
 2. 节点操作用 `MERGE`（幂等），而非 `CREATE`
 3. 必须指定标签（如 `:Character`），不允许无标签操作
 4. 节点和边的所有属性名以 schema 文件中的"字段"列（英文名）为准
@@ -47,38 +47,25 @@ allowed-tools: Read, Bash
 
 ### 4. 执行
 
-**⚠️ 重要：绝不在 `python -c "..."` 中内联 Cypher——Shell 会把 `$id`、`$name` 等参数当变量吃掉。
-始终用 `-f`（文件）或 `--stdin`（管道）方式传递 Cypher。**
-
-#### 方式 A：写入临时 .cypher 文件再执行（推荐）
-
-先将 Cypher 写入临时文件，再用 `-f` 执行：
+使用 `-c` 参数直接执行 Cypher 字符串（值已内联，无 `$param`）：
 
 ```bash
-python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -f /tmp/query.cypher --json
+python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "MATCH (n:Character {id: 'char_001'}) RETURN n" --json
 ```
 
-多条语句放在同一个文件中用 `;` 分隔，加 `--multi` 开启事务模式：
+多条语句用 `;` 分隔，加 `--multi` 开启事务模式：
 
 ```bash
-python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -f /tmp/batch.cypher --multi --json
+python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "MERGE (n:Character {id: 'char_001'}) SET n.name = '陆择'; MATCH (n:Character {id: 'char_001'}) RETURN n" --multi --json
 ```
 
-#### 方式 B：通过 stdin 管道（适合快速单条）
+如需传递较长 Cypher，使用 `--stdin` 管道：
 
 ```bash
-cat <<'CYPHER_EOF' | python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" --stdin --json
-MATCH (n:Character {char_id: $char_id})
-RETURN n.name AS name, n.status AS status
-CYPHER_EOF
-```
-
-> 注意 heredoc 标记用 **单引号** `'CYPHER_EOF'`，这样 `$char_id` 等 Cypher 参数不会被 Shell 展开。
-
-#### 方式 C：-c 参数（仅限无 `$` 参数的简单查询）
-
-```bash
-python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "CALL db.labels()" --json
+cat <<'EOF' | python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" --stdin --multi --json
+MERGE (n:Character {id: 'char_001'}) SET n.name = '陆择';
+MATCH (n:Character {id: 'char_001'}) RETURN n;
+EOF
 ```
 
 #### 写入操作
@@ -102,11 +89,8 @@ python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "CALL db.labels()" --j
 不确定图中数据结构时：
 
 ```bash
-# 节点标签
 python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "CALL db.labels()" --json
-# 边类型
 python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "CALL db.relationshipTypes()" --json
-# 属性键
 python "${CLAUDE_SKILL_DIR}/scripts/execute_cypher.py" -c "MATCH (n) WITH n LIMIT 1 RETURN keys(n) AS props" --json
 ```
 
@@ -145,44 +129,7 @@ python "${CLAUDE_SKILL_DIR}/scripts/test_connection.py"
 | `execute_cypher.py` | 执行任意 Cypher（**主要入口**，支持 `-c`/`-f`/`--stdin`/`--multi`/`--json`） |
 | `test_connection.py` | 连接测试 |
 
----
-
-## 子图查询模式
-
-查询某个角色的完整美术子图时，从 Character 出发多跳遍历：
-
-```cypher
-MATCH (ch:Character {id: $char_id})
-OPTIONAL MATCH (ch)-[:has_appearance]->(app:AppearanceStyle)
-OPTIONAL MATCH (ch)-[:has_costume]->(cos:CostumeStyle)
-OPTIONAL MATCH (ch)-[:has_voice_style]->(voice:LanguageStyle)
-OPTIONAL MATCH (app)-[:produces]->(ds:DesignSheet)
-OPTIONAL MATCH (ds)-[:produces]->(illus:IllusDesign)
-OPTIONAL MATCH (illus)-[:expands_to]->(stand:StandingIllustration)
-RETURN ch.id, app, cos, voice, ds,
-       collect(DISTINCT illus) AS illus_nodes,
-       collect(DISTINCT stand) AS stand_nodes
-```
-
-## Sync 级联查询模式
-
-沿 `sync=true` 边进行 BFS 级联时，迭代执行以下模式：
-
-```cypher
-// 单轮：查找某节点的 sync=true 下游
-MATCH (src {id: $source_id})-[r]->(dst)
-WHERE r.sync = true
-RETURN dst.id AS id, labels(dst)[0] AS type, type(r) AS edge_type
-
-// 重置下游节点 status
-MATCH (n {id: $node_id})
-SET n.status = 0
-RETURN n.id, labels(n)[0] AS type
-```
-
-级联算法在 agent 层迭代：取队首 → 查下游 → 重置 status=0 → 入队 → 重复直到无新节点。详见 [cypher-templates.md](references/cypher-templates.md) 的"Sync 级联查询"章节。
-
 ## Resources
 
-- [references/cypher-templates.md](references/cypher-templates.md) — Cypher 全量模板（CRUD + 查询 + 批量 + 美术图构建 + Sync 级联 + 子图状态查询）
+- [references/cypher-templates.md](references/cypher-templates.md) — Cypher 全量模板（CRUD + 查询 + 批量 + 美术图构建 + Sync 级联）
 - [references/bolt-connection.md](references/bolt-connection.md) — Bolt 连接配置

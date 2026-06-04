@@ -4,6 +4,8 @@
 
 字段名使用 schema 中定义的英文名。节点标签使用 schema 中的英文名（Character / Event / Scene / Info）。
 
+**注意**：模板中的 `$xxx` 是占位符，实际执行时替换为字面值（字符串用单引号，数字直接写）。不使用参数化查询。
+
 ## 目录
 
 - [节点 CRUD](#节点-crud)
@@ -549,132 +551,39 @@ MERGE (voice)-[r:ref_style]->(stand) SET r.sync = true;
 
 ## Sync 级联查询
 
-当上游节点更新时，沿 `sync=true` 边 BFS 级联重置下游节点 status。
-
-### 单轮级联：查找 sync=true 下游
+沿 `sync=true` 边 BFS 级联重置下游节点 status。在 agent 层迭代执行。
 
 ```cypher
-// 查找某个节点的所有 sync=true 出边下游
-MATCH (src {id: $source_id})-[r]->(dst)
+// 单轮：查找某节点的 sync=true 下游
+MATCH (src {id: 'appearance_001'})-[r]->(dst)
 WHERE r.sync = true
-RETURN dst.id AS id, labels(dst)[0] AS type, type(r) AS edge_type
-```
+RETURN dst.id AS id, labels(dst)[0] AS type
 
-### 重置下游节点 status
-
-```cypher
-// 将指定节点 status 重置为 0
-MATCH (n {id: $node_id})
+// 重置下游节点 status
+MATCH (n {id: 'design_001'})
 SET n.status = 0
 RETURN n.id, labels(n)[0] AS type
-```
-
-### 批量重置多个节点
-
-```cypher
-// 按节点 ID 列表批量重置
-UNWIND $ids AS nid
-MATCH (n {id: nid})
-SET n.status = 0
-RETURN n.id, labels(n)[0] AS type
-```
-
-### 级联算法（在 agent 层迭代执行）
-
-```
-1. 初始化队列 = [source_node_id]，已访问集合 = {}
-2. 循环直到队列为空:
-   a. 取出队首 current_id
-   b. 若 current_id 在已访问集合中，跳过
-   c. 将 current_id 加入已访问集合
-   d. 执行"单轮级联"查询找到所有 sync=true 下游
-   e. 对每个下游节点: 重置 status=0, 加入队列
-3. 返回已访问集合（除 source 外的所有节点）
-```
-
-### 级联路径示例
-
-```
-外貌变更 appearance_001:
-  appearance_001 →[produces✅]→ design_001 →[produces❌]→ (停止)
-  受影响: design_001
-
-语言风格变更 voice_001:
-  voice_001 →[ref_style✅]→ stand_001, stand_002, ...
-  受影响: 所有关联的 StandingIllustration
 ```
 
 ---
 
-## 子图状态查询
+## 子图查询
 
-查询角色完整的美术子图状态，用于 `status` 命令和流程推进判断。
-
-### 查询角色全部美术节点
+从任意节点出发，多跳遍历其关联子图：
 
 ```cypher
-// 方式1：从 Character 出发，多跳遍历
-MATCH (ch:Character {id: $char_id})
-OPTIONAL MATCH (ch)-[r1]->(data)
+// 通用：从某节点出发，多跳遍历所有关联节点和边
+MATCH (src {id: 'char_001'})
+OPTIONAL MATCH (src)-[r1]->(data)
 OPTIONAL MATCH (data)-[r2*0..3]->(downstream)
-RETURN ch.id AS char_id,
-       type(r1) AS edge1, labels(data)[0] AS data_type, data.id AS data_id, data.status AS data_status,
-       [rel IN r2 | type(rel)] AS edges2,
-       labels(downstream)[0] AS ds_type, downstream.id AS ds_id, downstream.status AS ds_status
+RETURN src, r1, data, r2, downstream
 
-// 方式2：按类型分查（更清晰）
-MATCH (ch:Character {id: $char_id})
-OPTIONAL MATCH (ch)-[:has_appearance]->(app:AppearanceStyle)
-OPTIONAL MATCH (ch)-[:has_costume]->(cos:CostumeStyle)
-OPTIONAL MATCH (ch)-[:has_voice_style]->(voice:LanguageStyle)
-OPTIONAL MATCH (app)-[:produces]->(ds:DesignSheet)
-OPTIONAL MATCH (ds)-[:produces]->(illus:IllusDesign)
-OPTIONAL MATCH (illus)-[:expands_to]->(stand:StandingIllustration)
-OPTIONAL MATCH (voice)-[:ref_style]->(stand2:StandingIllustration)
-RETURN ch.id AS char_id,
-       app.id AS appearance_id, app.status AS appearance_status,
-       cos.id AS costume_id, cos.status AS costume_status,
-       voice.id AS voice_id, voice.status AS voice_status,
-       ds.id AS design_id, ds.status AS design_status,
-       collect(DISTINCT {id: illus.id, status: illus.status}) AS illus_nodes,
-       collect(DISTINCT {id: stand.id, status: stand.status, label: stand.variant_label}) AS stand_nodes
-```
-
-### 查询待处理节点
-
-```cypher
-// 数据节点 status=0（可立即由 concept-designer 处理）
-MATCH (ch:Character {id: $char_id})-[:has_appearance|has_costume|has_voice_style]->(n)
+// 查询某节点的所有 status=0 的下游（待处理）
+MATCH (src {id: 'char_001'})-[*1..3]->(n)
 WHERE n.status = 0
-RETURN labels(n)[0] AS type, n.id AS id
+RETURN labels(n)[0] AS type, n.id AS id, n.status AS status
 
-// DesignSheet status=0（需要 AppearanceStyle 已完成）
-MATCH (ch:Character {id: $char_id})-[:has_appearance]->(app:AppearanceStyle)
-MATCH (app)-[:produces]->(ds:DesignSheet {status: 0})
-WHERE app.status = 1
-RETURN ds.id AS id
-
-// DesignSheet status=1（提示词完成，可生成图片）
-MATCH (ch:Character {id: $char_id})-[:has_appearance]->(app:AppearanceStyle)
-MATCH (app)-[:produces]->(ds:DesignSheet {status: 1})
-RETURN ds.id AS id, ds.prompt_path AS prompt_path
-
-// IllusDesign status=0（需要 DesignSheet 已完成）
-MATCH (ds:DesignSheet {status: 2})-[:produces]->(illus:IllusDesign {status: 0})
-RETURN illus.id AS id
-
-// StandingIllustration status=0（需要 IllusDesign 已完成）
-MATCH (illus:IllusDesign {status: 2})-[:expands_to]->(stand:StandingIllustration {status: 0})
-RETURN stand.id AS id, stand.variant_label AS label
-```
-
-### ID 分配
-
-```cypher
-// 查询某前缀的最大编号
-MATCH (n) WHERE n.id STARTS WITH $prefix
+// ID 分配：查询某前缀的最大编号
+MATCH (n) WHERE n.id STARTS WITH 'appearance_'
 RETURN n.id ORDER BY n.id DESC LIMIT 1
-
-// 用法：查询 'appearance_' 返回 'appearance_003'，则新 ID = 'appearance_004'
-// 无结果时从 _001 开始
 ```
